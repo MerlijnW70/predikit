@@ -5,10 +5,11 @@
 //! satisfies a predicate.
 //!
 //! A [`Refined<T, P>`] is a `T` that is *known* to satisfy predicate `P` — because the only
-//! ways to build one are [`Refined::try_new`] (checked once, at runtime) or a predicate's
-//! `const` constructor (checked by the compiler). After construction the value is immutable,
-//! so the proof can never be invalidated. [`Refined::into_inner`] and `Deref` hand the value
-//! back at zero cost.
+//! ways to build one are [`Refined::try_new`] (checked once, at runtime) or a built-in
+//! predicate's `const` constructor. predikit never mutates the value and exposes no `&mut`
+//! access, so for a `T` without interior mutability the refinement is permanent (see
+//! [Interior mutability](#interior-mutability)). [`Refined::into_inner`] and `Deref` hand the
+//! value back at zero cost.
 //!
 //! This is *parse, don't validate* as a type: once you hold a `Refined<T, P>`, every
 //! downstream function can rely on `P` without re-checking.
@@ -58,6 +59,15 @@
 //! assert!(Refined::<i64, Percent>::try_new(101).is_err()); // fails InRange
 //! ```
 //!
+//! # Interior mutability
+//!
+//! A refinement proves `P` held *at construction*, and predikit never mutates the value
+//! afterward. But if `T` offers interior mutability (`Cell`, `RefCell`, atomics, a `Mutex`,
+//! …), the value can still be changed through the shared reference returned by `get` /
+//! `Deref`, which may make `P` false. For a `T` without interior mutability — integers,
+//! `String`, and most types — the proof is permanent; refine an interior-mutable `T` only if
+//! you never mutate it through that shared reference.
+//!
 //! # Serde
 //!
 //! With the `serde` feature, `Refined<T, P>` serializes as its inner value and
@@ -80,9 +90,15 @@ pub trait Predicate<T> {
 
 /// A `T` proven to satisfy predicate `P`.
 ///
-/// The wrapped value is private and never mutated, so a `Refined<T, P>` you hold is a
-/// standing guarantee that `P` holds for it. Build one with [`Refined::try_new`] or a
-/// `const` constructor function ([`positive`], [`nonzero`], [`in_range`], …).
+/// The wrapped value is private and predikit never mutates it, so a `Refined<T, P>` you hold
+/// is a standing guarantee that `P` held at construction. For a `T` without interior
+/// mutability the guarantee is permanent (see the [crate docs](crate#interior-mutability)).
+/// Build one with [`Refined::try_new`] or, for a *built-in* predicate, a `const` constructor
+/// ([`positive`], [`nonzero`], [`in_range`], …); a custom [`Predicate`] uses
+/// [`Refined::try_new`].
+///
+/// `#[repr(transparent)]`: a `Refined<T, P>` has exactly the memory layout of `T`.
+#[repr(transparent)]
 pub struct Refined<T, P> {
     value: T,
     _p: PhantomData<P>,
@@ -272,8 +288,8 @@ impl<T, A: Predicate<T>, B: Predicate<T>> Predicate<T> for Or<A, B> {
     }
 }
 
-/// Refine a constant as [`Positive`] at compile time, rejecting any value that is not
-/// greater than zero.
+/// Refine `value` as [`Positive`] (`> 0`). A panicking `const fn`: an invalid value is a
+/// compile error in a `const` context and a panic when called at runtime.
 pub const fn positive(value: i64) -> Refined<i64, Positive> {
     assert!(
         value > 0,
@@ -285,8 +301,8 @@ pub const fn positive(value: i64) -> Refined<i64, Positive> {
     }
 }
 
-/// Refine a constant as [`Negative`] at compile time, rejecting any value that is not less
-/// than zero.
+/// Refine `value` as [`Negative`] (`< 0`). A panicking `const fn`: an invalid value is a
+/// compile error in a `const` context and a panic when called at runtime.
 pub const fn negative(value: i64) -> Refined<i64, Negative> {
     assert!(
         value < 0,
@@ -298,7 +314,8 @@ pub const fn negative(value: i64) -> Refined<i64, Negative> {
     }
 }
 
-/// Refine a constant as [`NonNegative`] at compile time, rejecting any negative value.
+/// Refine `value` as [`NonNegative`] (`>= 0`). A panicking `const fn`: an invalid value is a
+/// compile error in a `const` context and a panic when called at runtime.
 pub const fn non_negative(value: i64) -> Refined<i64, NonNegative> {
     assert!(
         value >= 0,
@@ -310,7 +327,8 @@ pub const fn non_negative(value: i64) -> Refined<i64, NonNegative> {
     }
 }
 
-/// Refine a constant as [`NonZero`] at compile time, rejecting a value of zero.
+/// Refine `value` as [`NonZero`] (`!= 0`). A panicking `const fn`: an invalid value is a
+/// compile error in a `const` context and a panic when called at runtime.
 pub const fn nonzero(value: i64) -> Refined<i64, NonZero> {
     assert!(value != 0, "predikit::nonzero: the value must not be zero");
     Refined {
@@ -319,7 +337,8 @@ pub const fn nonzero(value: i64) -> Refined<i64, NonZero> {
     }
 }
 
-/// Refine a constant as [`InRange`] at compile time, rejecting any value outside `MIN..=MAX`.
+/// Refine `value` as [`InRange`] (`MIN..=MAX`). A panicking `const fn`: an invalid value is
+/// a compile error in a `const` context and a panic when called at runtime.
 pub const fn in_range<const MIN: i64, const MAX: i64>(
     value: i64,
 ) -> Refined<i64, InRange<MIN, MAX>> {
@@ -471,13 +490,48 @@ mod tests {
     }
 
     #[test]
-    fn refinement_is_zero_cost_even_when_nested() {
+    fn repr_transparent_gives_the_inner_value_layout() {
+        // guaranteed by #[repr(transparent)], not merely observed: the marker adds nothing,
+        // and the guarantee composes under nesting (a purely-layout property — the nested
+        // type below is not itself constructible via try_new)
         assert_eq!(size_of::<Refined<i64, Positive>>(), size_of::<i64>());
         assert_eq!(
             size_of::<Refined<Refined<i64, Positive>, NonZero>>(),
-            size_of::<i64>(),
-            "nested refinement collapses to the inner value's size"
+            size_of::<i64>()
         );
+    }
+
+    #[test]
+    fn predicates_hold_at_the_i64_extremes() {
+        assert!(Positive::test(&i64::MAX), "MAX is positive");
+        assert!(!Positive::test(&i64::MIN));
+        assert!(Negative::test(&i64::MIN), "MIN is negative");
+        assert!(!Negative::test(&i64::MAX));
+        assert!(NonZero::test(&i64::MIN) && NonZero::test(&i64::MAX));
+        // an all-of-i64 range accepts the extremes
+        assert!(<InRange<{ i64::MIN }, { i64::MAX }>>::test(&i64::MIN));
+        assert!(<InRange<{ i64::MIN }, { i64::MAX }>>::test(&i64::MAX));
+    }
+
+    #[test]
+    fn an_inverted_range_is_empty_and_accepts_nothing() {
+        // InRange<10, 1> is MIN > MAX: `v >= 10 && v <= 1` is false for every v
+        assert!(!<InRange<10, 1>>::test(&1));
+        assert!(!<InRange<10, 1>>::test(&5));
+        assert!(!<InRange<10, 1>>::test(&10));
+        assert_eq!(Refined::<i64, InRange<10, 1>>::try_new(5), Err(5));
+    }
+
+    #[test]
+    fn a_custom_predicate_works_through_try_new() {
+        struct Even;
+        impl Predicate<i64> for Even {
+            fn test(value: &i64) -> bool {
+                value % 2 == 0
+            }
+        }
+        assert_eq!(*Refined::<i64, Even>::try_new(8).unwrap().get(), 8);
+        assert_eq!(Refined::<i64, Even>::try_new(7), Err(7));
     }
 
     #[test]

@@ -4,6 +4,24 @@ All notable changes to this crate are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## 0.3.1
+
+### Added
+
+- `#[repr(transparent)]` on `Refined<T, P>` — the "same layout as `T`" property is now a
+  guarantee, not merely a tested observation.
+
+### Documentation
+
+- Corrected the immutability claim: predikit never mutates the value, but a `T` with interior
+  mutability (`Cell`, atomics, …) can still change through a shared reference. Added an
+  *Interior mutability* section stating exactly when the proof is permanent.
+- Clarified that the `const` constructors are panicking `const fn`s — a compile error in a
+  `const` context, a panic at runtime — and that they exist for the built-in predicates
+  (custom predicates use `try_new`).
+- Added tests for the `i64` extremes, an inverted (empty) `InRange`, and a custom predicate;
+  softened the "tested exhaustively" wording.
+
 ## 0.3.0
 
 ### Added

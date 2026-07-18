@@ -72,11 +72,12 @@ let bad = serde_json::from_str::<Refined<i64, Positive>>("-1"); // Err — refus
 
 - **Parse, don't validate.** Push validation to the boundary once; carry the proof in the
   type. No defensive re-checking downstream.
-- **Opaque and immutable.** The inner value is private with no `&mut` access, so a refinement
-  can never be invalidated after it is made.
+- **Opaque, no mutation via this API.** The inner value is private with no `&mut` access, so
+  predikit never invalidates a refinement. (A `T` with interior mutability — `Cell`, atomics —
+  can still change through a shared reference; refine such a `T` only if you never mutate it.)
 - **Zero-cost.** `Refined<T, P>` has exactly the size of `T` — even nested:
-  `Refined<Refined<T, P1>, P2>` is still just a `T` in memory. `into_inner()`, `Deref`,
-  and `AsRef` are free.
+  `Refined<Refined<T, P1>, P2>` is still just a `T` in memory (`#[repr(transparent)]`).
+  `into_inner()`, `Deref`, and `AsRef` are free.
 - **Fully interoperable.** Forwards `Clone`, `Copy`, `Debug`, `Display`, `PartialEq`, `Eq`,
   `PartialOrd`, `Ord`, and `Hash` to the inner value, so a refinement drops into ordered
   and hashed collections.
@@ -101,6 +102,14 @@ impl Predicate<i64> for Even {
 let e = Refined::<i64, Even>::try_new(8).unwrap();
 assert_eq!(*e, 8);
 ```
+
+## Testing
+
+Predicate boundaries (including the `i64` extremes and an inverted, empty range), the
+runtime and `const` constructors, the compile-time rejection of invalid constants, a custom
+predicate, the combinators, the `#[repr(transparent)]` layout, serde round-tripping with
+re-validation, and the forwarded traits are all exercised by the test suite — behavior is
+pinned, not merely line-covered.
 
 ## License
 
