@@ -20,19 +20,22 @@ assert_eq!(Refined::<i64, Positive>::try_new(-1), Err(-1));
 
 ## Compile-time refinement
 
-Constants are checked by the compiler — invalid values simply **do not compile**:
+The `const` constructors `positive`, `nonzero`, and `in_range` infer their type — no
+turbofish on `Refined` needed. Invalid constants simply **do not compile**:
 
 ```rust
-use predikit::{Refined, InRange};
+use predikit::{in_range, positive, Refined, InRange, Positive};
 
-const PORT: Refined<i64, InRange<1, 65535>> = Refined::<i64, InRange<1, 65535>>::new(8080);
+const PORT: Refined<i64, InRange<1, 65535>> = in_range::<1, 65535>(8080);
+const RETRIES: Refined<i64, Positive> = positive(3);
 assert_eq!(*PORT.get(), 8080);
+assert_eq!(*RETRIES.get(), 3);
 ```
 
 ```rust,compile_fail
-use predikit::{Refined, Positive};
+use predikit::positive;
 // rejected at compile time — this does not build
-const BAD: Refined<i64, Positive> = Refined::<i64, Positive>::new(-5);
+const BAD: predikit::Refined<i64, predikit::Positive> = positive(-5);
 ```
 
 ## Why
@@ -50,7 +53,7 @@ const BAD: Refined<i64, Positive> = Refined::<i64, Positive>::new(-5);
 
 ## Built-in predicates
 
-`Positive` (`> 0`), `NonZero` (`!= 0`), and `InRange<MIN, MAX>` (inclusive). Write your own
+`Positive` (`> 0`), `NonZero` (`!= 0`), and `InRange<MIN, MAX>` (inclusive), each with a `const` constructor (`positive`, `nonzero`, `in_range`). Write your own
 by implementing the `Predicate<T>` trait:
 
 ```rust

@@ -6,8 +6,8 @@
 //! A [`Refined<T, P>`] is a `T` that is *known* to satisfy predicate `P` — because the only
 //! ways to build one are [`Refined::try_new`] (checked once, at runtime) or a predicate's
 //! `const` constructor (checked by the compiler). After construction the value is immutable,
-//! so the proof can never be invalidated. `into_inner` and `Deref` hand the value back at
-//! zero cost.
+//! so the proof can never be invalidated. [`Refined::into_inner`] and `Deref` hand the value
+//! back at zero cost.
 //!
 //! This is *parse, don't validate* as a type: once you hold a `Refined<T, P>`, every
 //! downstream function can rely on `P` without re-checking.
@@ -26,19 +26,23 @@
 //!
 //! # Compile-time refinement
 //!
-//! ```
-//! use predikit::{Refined, InRange};
+//! The constructor functions [`positive`], [`nonzero`], and [`in_range`] are `const` and
+//! infer their type — no turbofish on `Refined` needed:
 //!
-//! // checked by the compiler — no runtime work
-//! const PORT: Refined<i64, InRange<1, 65535>> = Refined::<i64, InRange<1, 65535>>::new(8080);
+//! ```
+//! use predikit::{in_range, positive, Refined, InRange, Positive};
+//!
+//! const PORT: Refined<i64, InRange<1, 65535>> = in_range::<1, 65535>(8080);
+//! const RETRIES: Refined<i64, Positive> = positive(3);
 //! assert_eq!(*PORT.get(), 8080);
+//! assert_eq!(*RETRIES.get(), 3);
 //! ```
 //!
 //! An invalid constant does not compile:
 //!
 //! ```compile_fail
-//! use predikit::{Refined, Positive};
-//! const BAD: Refined<i64, Positive> = Refined::<i64, Positive>::new(-5); // rejected at compile time
+//! use predikit::positive;
+//! const BAD: predikit::Refined<i64, predikit::Positive> = positive(-5); // rejected at compile time
 //! ```
 
 use core::marker::PhantomData;
@@ -56,8 +60,8 @@ pub trait Predicate<T> {
 /// A `T` proven to satisfy predicate `P`.
 ///
 /// The wrapped value is private and never mutated, so a `Refined<T, P>` you hold is a
-/// standing guarantee that `P` holds for it. Build one with [`Refined::try_new`] or a
-/// predicate's `const` constructor.
+/// standing guarantee that `P` holds for it. Build one with [`Refined::try_new`] or one of
+/// the `const` constructor functions ([`positive`], [`nonzero`], [`in_range`]).
 pub struct Refined<T, P> {
     value: T,
     _p: PhantomData<P>,
@@ -133,34 +137,12 @@ impl Predicate<i64> for Positive {
     }
 }
 
-impl Refined<i64, Positive> {
-    /// Construct at compile time, rejecting any value that is not greater than zero.
-    pub const fn new(value: i64) -> Self {
-        assert!(value > 0, "Refined<i64, Positive>: the value must be greater than zero");
-        Refined {
-            value,
-            _p: PhantomData,
-        }
-    }
-}
-
 /// The predicate `value != 0`.
 pub struct NonZero;
 
 impl Predicate<i64> for NonZero {
     fn test(value: &i64) -> bool {
         *value != 0
-    }
-}
-
-impl Refined<i64, NonZero> {
-    /// Construct at compile time, rejecting a value of zero.
-    pub const fn new(value: i64) -> Self {
-        assert!(value != 0, "Refined<i64, NonZero>: the value must not be zero");
-        Refined {
-            value,
-            _p: PhantomData,
-        }
     }
 }
 
@@ -173,17 +155,39 @@ impl<const MIN: i64, const MAX: i64> Predicate<i64> for InRange<MIN, MAX> {
     }
 }
 
-impl<const MIN: i64, const MAX: i64> Refined<i64, InRange<MIN, MAX>> {
-    /// Construct at compile time, rejecting any value outside `MIN..=MAX`.
-    pub const fn new(value: i64) -> Self {
-        assert!(
-            value >= MIN && value <= MAX,
-            "Refined<i64, InRange<MIN, MAX>>: the value is out of range"
-        );
-        Refined {
-            value,
-            _p: PhantomData,
-        }
+/// Refine a constant as [`Positive`] at compile time, rejecting any value that is not
+/// greater than zero.
+pub const fn positive(value: i64) -> Refined<i64, Positive> {
+    assert!(
+        value > 0,
+        "predikit::positive: the value must be greater than zero"
+    );
+    Refined {
+        value,
+        _p: PhantomData,
+    }
+}
+
+/// Refine a constant as [`NonZero`] at compile time, rejecting a value of zero.
+pub const fn nonzero(value: i64) -> Refined<i64, NonZero> {
+    assert!(value != 0, "predikit::nonzero: the value must not be zero");
+    Refined {
+        value,
+        _p: PhantomData,
+    }
+}
+
+/// Refine a constant as [`InRange`] at compile time, rejecting any value outside `MIN..=MAX`.
+pub const fn in_range<const MIN: i64, const MAX: i64>(
+    value: i64,
+) -> Refined<i64, InRange<MIN, MAX>> {
+    assert!(
+        value >= MIN && value <= MAX,
+        "predikit::in_range: the value is out of range"
+    );
+    Refined {
+        value,
+        _p: PhantomData,
     }
 }
 
@@ -231,10 +235,10 @@ mod tests {
     }
 
     #[test]
-    fn const_new_builds_valid_values() {
-        const P: Refined<i64, Positive> = Refined::<i64, Positive>::new(3);
-        const Z: Refined<i64, NonZero> = Refined::<i64, NonZero>::new(-9);
-        const R: Refined<i64, InRange<1, 100>> = Refined::<i64, InRange<1, 100>>::new(100);
+    fn const_constructors_build_valid_values_and_infer_their_type() {
+        const P: Refined<i64, Positive> = positive(3);
+        const Z: Refined<i64, NonZero> = nonzero(-9);
+        const R: Refined<i64, InRange<1, 100>> = in_range::<1, 100>(100);
         assert_eq!(*P.get(), 3);
         assert_eq!(*Z.get(), -9);
         assert_eq!(*R.get(), 100);
@@ -242,32 +246,32 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn positive_new_rejects_zero() {
-        let _ = Refined::<i64, Positive>::new(0);
+    fn positive_rejects_zero() {
+        let _ = positive(0);
     }
 
     #[test]
     #[should_panic]
-    fn nonzero_new_rejects_zero() {
-        let _ = Refined::<i64, NonZero>::new(0);
+    fn nonzero_rejects_zero() {
+        let _ = nonzero(0);
     }
 
     #[test]
     #[should_panic]
-    fn inrange_new_rejects_below_min() {
-        let _ = Refined::<i64, InRange<1, 10>>::new(0);
+    fn in_range_rejects_below_min() {
+        let _ = in_range::<1, 10>(0);
     }
 
     #[test]
     #[should_panic]
-    fn inrange_new_rejects_above_max() {
-        let _ = Refined::<i64, InRange<1, 10>>::new(11);
+    fn in_range_rejects_above_max() {
+        let _ = in_range::<1, 10>(11);
     }
 
     #[test]
-    fn inrange_new_accepts_both_boundaries() {
-        assert_eq!(*Refined::<i64, InRange<1, 10>>::new(1).get(), 1);
-        assert_eq!(*Refined::<i64, InRange<1, 10>>::new(10).get(), 10);
+    fn in_range_accepts_both_boundaries() {
+        assert_eq!(*in_range::<1, 10>(1).get(), 1);
+        assert_eq!(*in_range::<1, 10>(10).get(), 10);
     }
 
     #[test]

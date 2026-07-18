@@ -1,6 +1,6 @@
 [package]
 name = "predikit"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Refinement types: a value carried with a compile-time proof that it satisfies a predicate — parse, don't validate, as a type. no_std, zero-dependency."
 license = "MIT OR Apache-2.0"
