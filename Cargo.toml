@@ -1,12 +1,20 @@
 [package]
 name = "predikit"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
-description = "Refinement types: a value carried with a compile-time proof that it satisfies a predicate — parse, don't validate, as a type. no_std, zero-dependency."
+rust-version = "1.61.0"
+description = "Refinement types: a value carried with a compile-time proof that it satisfies a predicate — parse, don't validate, as a type. no_std, zero-dependency, with predicate combinators and optional serde validation."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/MerlijnW70/predikit"
 keywords = ["refinement", "types", "invariant", "const-fn", "no-std"]
 categories = ["no-std", "rust-patterns", "data-structures"]
 readme = "README.md"
 
+[features]
+serde = ["dep:serde"]
+
 [dependencies]
+serde = { version = "1", optional = true, default-features = false }
+
+[dev-dependencies]
+serde_json = "1"
